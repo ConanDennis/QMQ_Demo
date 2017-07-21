@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd">
+    <context:property-placeholder location= "classpath:*.properties"  ignore-unresolvable= "true" />
+    <context:annotation-config />
+    <!-- 配置业务数据源 -->
+    <bean id= "prodDataSource" class= "org.apache.tomcat.jdbc.pool.DataSource"
+          destroy-method= "close" autowire= "no" >
+        <property name = "fairQueue" value= "false" />
+        <property name = "minIdle" value= "1" />
+        <property name = "maxIdle" value= "5" />
+        <property name = "maxActive" value= "5" />
+        <property name = "initialSize" value= "1" />
+        <property name = "testOnBorrow" value= "true" />
+        <property name = "validationQuery" value= "select 1" />
+        <property name = "validationInterval" value= "500000" /> <!-- 5min -->
+        <property name = "removeAbandoned" value= "true" />
+        <property name = "removeAbandonedTimeout" value= "30" />
+        <property name = "driverClassName" value= "${mysql.jdbc.driver}" />
+        <property name = "url" value= "${mysql.jdbc.url}" />
+        <!-- qmq和业务共享数据源 业务数据源的账户需要对qmq_produce数据库有增删改查的权限 -->
+        <property name = "username" value= "${mysql.jdbc.username}" />
+        <property name = "password" value= "${mysql.jdbc.password}" />
+    </bean>
+
+    <!-- 配置qmq定制事务管理器，已确保消息的持久化和业务操作在同一个事务中 -->
+    <bean id= "transactionManager" class= "qunar.tc.qmq.producer.tx.TransactionManager" >
+        <constructor-arg name ="dataSource" ref="prodDataSource" />
+        <!-- trackerRegistry 为 qmq_task dubbo服务的注册中心地址 -->
+        <property name ="trackerRegistry" value= "${qmq.task.zk.addr}" />
+    </bean>
+
+    <!-- QMQ provider-->
+    <bean id="messageSendStateListener" class="ProviderListener"></bean>
+    <!-- 持久型消息生产者：可发送事务持久消息和非事务持久型消息 -->
+    <bean id= "messageProducer" class= "qunar.tc.qmq.producer.MessageProducerProvider" >
+        <!-- registryURL 为 qmq_server dubbo服务的注册中心地址 -->
+        <constructor-arg name = "registryURL" value= "${qmq.broker.zk.addr}" />
+        <property name = "transactionManager" ref= "transactionManager" />
+        <property name="messageSendStateListener" ref="messageSendStateListener"/>
+    </bean>
+
+    <!-- QMQ consumer -->
+    <bean id="messageConsumer" class="qunar.tc.qmq.consumer.MessageConsumerProvider" init-method="init"
+          destroy-method="destroy">
+        <constructor-arg name="zkAddress" value="${qmq.zk.address.list}"/>
+        <constructor-arg name="servicePort" value="30231"/>
+    </bean>
+    <bean class="QmqMessageListener" init-method="init" destroy-method="destroy">
+        <constructor-arg name="messageConsumer" ref="messageConsumer" />
+    </bean>
+
+</beans>
